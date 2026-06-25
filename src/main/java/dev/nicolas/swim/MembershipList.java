@@ -1,5 +1,6 @@
 package dev.nicolas.swim;
 
+import java.net.InetSocketAddress;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -41,6 +42,18 @@ public class MembershipList {
 
     public Optional<Member> get(String id) {
         return Optional.ofNullable(members.get(id));
+    }
+
+    public Optional<Member> findByAddress(InetSocketAddress address) {
+        return members.values().stream()
+                .filter(m -> m.address().equals(address))
+                .findFirst();
+    }
+
+    public List<Member> aliveOrSuspect() {
+        return members.values().stream()
+                .filter(m -> m.state() != MemberState.DEAD)
+                .toList();
     }
 
     public List<Member> getAll() {
