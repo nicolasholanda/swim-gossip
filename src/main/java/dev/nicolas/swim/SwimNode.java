@@ -65,7 +65,7 @@ public class SwimNode implements AutoCloseable {
         switch (msg) {
             case Message.Ping p -> failureDetector.onPing(from, p);
             case Message.Ack a -> failureDetector.onAck(from, a);
-            case Message.PingReq pr -> { /* implemented in indirect probing */ }
+            case Message.PingReq pr -> failureDetector.onPingReq(from, pr);
         }
     }
 
