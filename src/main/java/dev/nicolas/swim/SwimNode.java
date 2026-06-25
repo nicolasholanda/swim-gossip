@@ -7,7 +7,6 @@ import dev.nicolas.swim.event.EventType;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,7 +26,7 @@ public class SwimNode implements AutoCloseable {
     private final FailureDetector failureDetector;
 
     private volatile int selfIncarnation;
-    private final List<Update> pendingUpdates = Collections.synchronizedList(new ArrayList<>());
+    private final Disseminator disseminator;
     private final Map<String, ScheduledFuture<?>> suspectTimers = new ConcurrentHashMap<>();
     private final ScheduledExecutorService suspectScheduler;
 
@@ -40,6 +39,7 @@ public class SwimNode implements AutoCloseable {
         this.config = config;
         this.eventSink = eventSink;
         this.selfIncarnation = membership.get(id).map(Member::incarnation).orElse(0);
+        this.disseminator = new Disseminator(config, membership);
         this.suspectScheduler = Executors.newScheduledThreadPool(1, r -> {
             Thread t = new Thread(r, "swim-suspect-" + id);
             t.setDaemon(true);
@@ -83,6 +83,10 @@ public class SwimNode implements AutoCloseable {
         return selfIncarnation;
     }
 
+    public Disseminator disseminator() {
+        return disseminator;
+    }
+
     public void applyUpdate(Update u) {
         applyUpdates(List.of(u));
     }
@@ -97,7 +101,7 @@ public class SwimNode implements AutoCloseable {
         Member suspected = target.withState(MemberState.SUSPECT);
         if (membership.merge(suspected)) {
             Update u = new Update(target.id(), target.address(), MemberState.SUSPECT, target.incarnation());
-            pendingUpdates.add(u);
+            disseminator.add(u);
             eventSink.accept(Event.of(EventType.SUSPECT, id, target.id(),
                     Map.of("incarnation", target.incarnation())));
             scheduleSuspectTimer(target.id(), target.incarnation());
@@ -125,7 +129,7 @@ public class SwimNode implements AutoCloseable {
             Member dead = current.withState(MemberState.DEAD);
             if (membership.merge(dead)) {
                 Update u = new Update(memberId, current.address(), MemberState.DEAD, current.incarnation());
-                pendingUpdates.add(u);
+                disseminator.add(u);
                 eventSink.accept(Event.of(EventType.DEAD, id, memberId,
                         Map.of("incarnation", current.incarnation())));
             }
@@ -151,7 +155,7 @@ public class SwimNode implements AutoCloseable {
             Member refuted = new Member(id, addr, MemberState.ALIVE, newInc);
             membership.merge(refuted);
             Update refute = new Update(id, addr, MemberState.ALIVE, newInc);
-            pendingUpdates.add(refute);
+            disseminator.add(refute);
             eventSink.accept(Event.of(EventType.ALIVE, id, id,
                     Map.of("incarnation", newInc, "refute", true)));
         }
@@ -160,7 +164,7 @@ public class SwimNode implements AutoCloseable {
     private void handlePeerUpdate(Update u) {
         Member incoming = new Member(u.id(), u.address(), u.state(), u.incarnation());
         if (membership.merge(incoming)) {
-            pendingUpdates.add(u);
+            disseminator.add(u);
             switch (u.state()) {
                 case ALIVE -> {
                     eventSink.accept(Event.of(EventType.ALIVE, id, u.id(),
@@ -217,15 +221,12 @@ public class SwimNode implements AutoCloseable {
     }
 
     private Message attachPiggyback(Message msg) {
-        if (pendingUpdates.isEmpty()) return msg;
-        List<Update> drained;
-        synchronized (pendingUpdates) {
-            if (pendingUpdates.isEmpty()) return msg;
-            drained = new ArrayList<>(pendingUpdates);
-            pendingUpdates.clear();
-        }
-        List<Update> combined = new ArrayList<>(piggybackOf(msg));
-        combined.addAll(drained);
+        List<Update> existing = piggybackOf(msg);
+        int budget = Math.max(0, config.maxMessageBytes() - 200);
+        List<Update> selected = disseminator.select(budget);
+        if (selected.isEmpty()) return msg;
+        List<Update> combined = new ArrayList<>(existing);
+        combined.addAll(selected);
         return switch (msg) {
             case Message.Ping p -> new Message.Ping(p.seqNo(), combined);
             case Message.Ack a -> new Message.Ack(a.seqNo(), combined);
