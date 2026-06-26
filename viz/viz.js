@@ -16,6 +16,9 @@ const STRINGS = {
     timeFormat: (cur, total) => `${cur.toFixed(2)}s / ${total.toFixed(2)}s`,
     convergence: (s) => `convergence: ${s.toFixed(2)}s`,
     convergencePending: "convergence: …",
+    live: (n) => `live · ${n} events`,
+    liveConnecting: (url) => `connecting to ${url}…`,
+    liveError: "SSE disconnected",
 };
 
 const COLORS = {
@@ -69,6 +72,7 @@ const state = {
     speed: 1,
     lastFrame: 0,
     convergenceMs: null,
+    live: false,
 };
 
 function colorForType(type) {
@@ -274,6 +278,54 @@ function setup(events) {
     updateTimeLabel();
 }
 
+function appendLiveEvent(e) {
+    if (state.events.length === 0) {
+        state.startWall = e.timestampMillis;
+    }
+    state.events.push(e);
+    state.endWall = e.timestampMillis;
+    state.durationMs = Math.max(0, state.endWall - state.startWall);
+
+    const prevCount = state.nodes.length;
+    state.nodes = discoverNodes(state.events);
+    if (state.nodes.length !== prevCount) {
+        state.positions = layoutNodes(state.nodes);
+    }
+
+    scrubber.max = String(state.durationMs);
+    state.convergenceMs = computeConvergence(state.events);
+    if (state.convergenceMs != null) {
+        statusConv.textContent = STRINGS.convergence(state.convergenceMs / 1000);
+    }
+
+    const wasAtEnd = state.currentMs >= state.durationMs - 200;
+    if (wasAtEnd) {
+        state.currentMs = state.durationMs;
+        scrubber.value = String(state.currentMs);
+    }
+
+    statusData.textContent = STRINGS.live(state.events.length);
+}
+
+function startLive(url) {
+    state.live = true;
+    state.playing = true;
+    playBtn.textContent = STRINGS.pause;
+    statusData.textContent = STRINGS.liveConnecting(url);
+    const es = new EventSource(url);
+    es.onmessage = (ev) => {
+        try {
+            const e = JSON.parse(ev.data);
+            appendLiveEvent(e);
+        } catch (err) {
+            console.warn("bad event", err);
+        }
+    };
+    es.onerror = () => {
+        statusData.textContent = STRINGS.liveError;
+    };
+}
+
 playBtn.addEventListener("click", () => {
     if (state.events.length === 0) return;
     state.playing = !state.playing;
@@ -292,14 +344,19 @@ scrubber.addEventListener("input", () => {
 });
 
 (async function start() {
-    try {
-        const params = new URLSearchParams(window.location.search);
-        const url = params.get("data") || "sample-events.jsonl";
-        const events = await loadEvents(url);
-        if (events.length === 0) throw new Error("no events");
-        setup(events);
-    } catch (e) {
-        statusData.textContent = STRINGS.loadError(e.message || String(e));
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("live")) {
+        const liveUrl = params.get("live") || "http://localhost:8080/events";
+        startLive(liveUrl);
+    } else {
+        try {
+            const url = params.get("data") || "sample-events.jsonl";
+            const events = await loadEvents(url);
+            if (events.length === 0) throw new Error("no events");
+            setup(events);
+        } catch (e) {
+            statusData.textContent = STRINGS.loadError(e.message || String(e));
+        }
     }
     requestAnimationFrame(tick);
 })();

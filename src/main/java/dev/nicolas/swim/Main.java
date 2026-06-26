@@ -1,7 +1,9 @@
 package dev.nicolas.swim;
 
+import dev.nicolas.swim.event.BroadcastSink;
 import dev.nicolas.swim.event.EventSink;
 import dev.nicolas.swim.event.JsonlFileSink;
+import dev.nicolas.swim.event.SseServer;
 
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
@@ -34,7 +36,20 @@ public class Main {
         SwimConfig config = SwimConfig.defaults();
         Codec codec = new Codec(config.maxMessageBytes());
 
-        EventSink sink = outPath != null ? new JsonlFileSink(Path.of(outPath)) : EventSink.NOOP;
+        JsonlFileSink fileSink = outPath != null ? new JsonlFileSink(Path.of(outPath)) : null;
+        SseServer sseServer = null;
+        EventSink sink;
+        if (opts.containsKey("--live")) {
+            BroadcastSink broadcast = new BroadcastSink();
+            if (fileSink != null) broadcast.subscribe(fileSink::accept);
+            int ssePort = Integer.parseInt(opts.getOrDefault("--port", "8080"));
+            sseServer = new SseServer(ssePort, broadcast);
+            sseServer.start();
+            System.out.println("[cluster] SSE on http://localhost:" + sseServer.port() + "/events");
+            sink = broadcast;
+        } else {
+            sink = fileSink != null ? fileSink : EventSink.NOOP;
+        }
 
         List<InetSocketAddress> addresses = new ArrayList<>();
         for (int i = 0; i < n; i++) {
@@ -69,8 +84,11 @@ public class Main {
             for (SwimNode node : nodes) {
                 try { node.close(); } catch (Exception ignored) {}
             }
-            if (sink instanceof AutoCloseable c) {
-                try { c.close(); } catch (Exception ignored) {}
+            if (sseServer != null) {
+                try { sseServer.close(); } catch (Exception ignored) {}
+            }
+            if (fileSink != null) {
+                try { fileSink.close(); } catch (Exception ignored) {}
             }
             System.out.println("[cluster] shut down after " + (System.currentTimeMillis() - start) + "ms");
         }
@@ -97,7 +115,7 @@ public class Main {
     private static void printUsage() {
         System.out.println("""
                 Usage:
-                  swim-gossip cluster --nodes N [--port-base 7000] [--duration 10s] [--kill-at 5s] [--out events.jsonl]
+                  swim-gossip cluster --nodes N [--port-base 7000] [--duration 10s] [--kill-at 5s] [--out events.jsonl] [--live --port 8080]
                 """);
     }
 }
