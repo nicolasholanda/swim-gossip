@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>swim-gossip visualizer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+    <h1 id="title">swim-gossip</h1>
+    <div class="legend">
+        <span class="legend-item"><span class="dot alive"></span><span id="legend-alive">alive</span></span>
+        <span class="legend-item"><span class="dot suspect"></span><span id="legend-suspect">suspect</span></span>
+        <span class="legend-item"><span class="dot dead"></span><span id="legend-dead">dead</span></span>
+        <span class="legend-item"><span class="line solid"></span><span id="legend-probe">probe</span></span>
+        <span class="legend-item"><span class="line dashed"></span><span id="legend-gossip">gossip</span></span>
+    </div>
+</header>
+
+<main>
+    <canvas id="canvas" width="900" height="600"></canvas>
+</main>
+
+<footer>
+    <div class="controls">
+        <button id="play-pause" type="button">▶</button>
+        <label>
+            <span id="label-speed">speed</span>
+            <select id="speed">
+                <option value="0.5">0.5×</option>
+                <option value="1" selected>1×</option>
+                <option value="2">2×</option>
+                <option value="4">4×</option>
+                <option value="8">8×</option>
+            </select>
+        </label>
+        <input id="scrubber" type="range" min="0" max="0" value="0" step="10">
+        <span id="time">0.00s / 0.00s</span>
+    </div>
+    <div class="status">
+        <span id="status-data">loading sample-events.jsonl…</span>
+        <span id="status-convergence"></span>
+    </div>
+</footer>
+
+<script src="viz.js"></script>
+</body>
+</html>
